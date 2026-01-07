@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>汪汪隊：阿奇電路救援</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Segoe UI', 'Microsoft JhengHei', sans-serif; background: #87CEEB; touch-action: none; user-select: none; }
+        
+        #ui-container {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            z-index: 10;
+            color: white;
+            text-shadow: 1px 1px 3px rgba(0,0,0,0.5);
+            pointer-events: none;
+        }
+        .panel {
+            background: rgba(0, 0, 0, 0.6);
+            padding: 12px;
+            border-radius: 12px;
+            border: 2px solid #FFD700;
+            pointer-events: auto;
+            margin-bottom: 10px;
+            width: 220px;
+            position: relative;
+        }
+
+        #minimap-container {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            width: 130px;
+            height: 130px;
+            background: rgba(0, 0, 0, 0.5);
+            border: 3px solid #FFD700;
+            border-radius: 50%;
+            overflow: hidden;
+            z-index: 30;
+        }
+        #minimap-canvas { width: 100%; height: 100%; }
+
+        #touch-controls {
+            position: absolute;
+            bottom: 30px;
+            right: 30px;
+            display: grid;
+            grid-template-areas: ". up ." "left down right";
+            gap: 12px;
+            z-index: 200;
+        }
+        .ctrl-btn {
+            width: 65px; height: 65px;
+            background: rgba(255, 255, 255, 0.2);
+            border: 2px solid white;
+            border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 26px; color: white; cursor: pointer;
+            backdrop-filter: blur(5px); pointer-events: auto;
+        }
+        .ctrl-btn:active { background: rgba(255, 215, 0, 0.5); transform: scale(0.9); }
+
+        /* 小遊戲介面 */
+        #minigame-view {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.95);
+            display: none; z-index: 1000; flex-direction: column; align-items: center; justify-content: center;
+            color: white;
+            text-align: center;
+        }
+        
+        .wire-game-wrapper {
+            position: relative;
+            display: flex; align-items: center; justify-content: center;
+            margin-top: 20px;
+        }
+        
+        /* 放置在對角線的節點 */
+        .io-node {
+            position: absolute;
+            width: 50px; height: 50px; border-radius: 50%; background: #333;
+            display: flex; align-items: center; justify-content: center; font-size: 20px;
+            border: 3px solid #555; transition: all 0.5s; z-index: 10;
+        }
+        #start-node { top: -25px; left: -25px; }
+        #end-node { bottom: -25px; right: -25px; }
+
+        .io-node.active-start { background: #ffd700; border-color: #fff; box-shadow: 0 0 20px #ffd700; color: #000; }
+        .io-node.active-end { background: #00f2ff; border-color: #fff; box-shadow: 0 0 20px #00f2ff; color: #000; }
+
+        #puzzle-container {
+            position: relative; width: 320px; height: 320px;
+            background: #222; border: 4px solid #444; border-radius: 10px;
+            display: grid; grid-template-columns: repeat(4, 1fr); grid-template-rows: repeat(4, 1fr);
+            gap: 2px;
+        }
+        
+        .wire-cell {
+            background: #2a2a2a; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            position: relative; transition: background 0.3s;
+        }
+        .wire-cell:hover { background: #3a3a3a; }
+        .wire-cell svg { width: 80%; height: 80%; transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+        .wire-cell.active svg line, .wire-cell.active svg path { 
+            stroke: #00f2ff; stroke-width: 14; filter: drop-shadow(0 0 8px #00f2ff); 
+        }
+        
+        #message-box {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            background: white; padding: 35px; border-radius: 30px;
+            text-align: center; display: none; z-index: 2000;
+            border: 10px solid #00008B; width: 85%; max-width: 420px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.5); color: #333;
+        }
+    </style>
+</head>
+<body onclick="window.focus();">
+
+    <div id="ui-container">
+        <div class="panel" id="main-panel">
+            <h3 style="margin:0; color:#FFD700; font-size: 20px;">🚓 阿奇救援行動</h3>
+            <div style="font-size: 18px; font-weight: bold; margin-top:5px;">🏅 勳章: <span id="score">0</span></div>
+            <div style="margin-top:12px; border-top: 1px solid rgba(255,255,255,0.2); padding-top:10px;">
+                <div id="mission-desc" style="font-size:14px; background:rgba(0,0,0,0.3); padding:8px; border-radius:8px;">尋找損壞的號誌燈...</div>
+                <div id="ai-status" style="font-size:11px; color:#FFD700; margin-top:5px; height:15px;"></div>
+                <button onclick="getStrategy()" style="width:100%; margin-top:10px; padding:8px; font-size:12px; cursor:pointer; border-radius:6px; border:none; background:#00008B; color:white;">✨ 萊德隊長的建議</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="minimap-container"><canvas id="minimap-canvas"></canvas></div>
+
+    <div id="minigame-view">
+        <h2 id="mini-title" style="color: #FFD700; font-size: 28px; margin-bottom: 5px;">🚦 電路修復中</h2>
+        <p id="mini-hint" style="color:#ADD8E6; font-size: 16px; margin-bottom: 15px;">對角線連通：從左上角⚡連到右下角🚦！</p>
+        
+        <div class="wire-game-wrapper">
+            <div id="start-node" class="io-node active-start">⚡</div>
+            <div id="puzzle-container"></div>
+            <div id="end-node" class="io-node">🚦</div>
+        </div>
+        
+        <button id="mini-finish-btn" onclick="closeMinigame()" style="margin-top:40px; padding:15px 50px; border-radius:40px; background:linear-gradient(to right, #004e92, #000428); color:white; border:none; font-weight:bold; cursor:pointer; display:none; font-size:20px; box-shadow: 0 5px 15px rgba(0,0,0,0.3);">✨ 修復完成！</button>
+    </div>
+
+    <div id="touch-controls">
+        <div class="ctrl-btn" style="grid-area:up" ontouchstart="keys['ArrowUp']=true" ontouchend="keys['ArrowUp']=false">↑</div>
+        <div class="ctrl-btn" style="grid-area:left" ontouchstart="keys['ArrowLeft']=true" ontouchend="keys['ArrowLeft']=false">←</div>
+        <div class="ctrl-btn" style="grid-area:down" ontouchstart="keys['ArrowDown']=true" ontouchend="keys['ArrowDown']=false">↓</div>
+        <div class="ctrl-btn" style="grid-area:right" ontouchstart="keys['ArrowRight']=true" ontouchend="keys['ArrowRight']=false">→</div>
+    </div>
+
+    <div id="message-box">
+        <h2 id="msg-title">🚨 萊德隊長廣播</h2>
+        <p id="msg-content">...</p>
+        <button onclick="closeMessage()" style="margin-top:20px; padding:12px 50px; border-radius:30px; background:#00008B; color:white; border:none; cursor:pointer; font-weight:bold;">出發！</button>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        const apiKey = ""; 
+        let scene, camera, renderer;
+        let player, playerBody, keys = {};
+        let score = 0;
+        let missionObject = null, isMinigameActive = false;
+        let speed = 0, rotation = 0;
+        let cameraZoom = false;
+        let currentMissionFullText = "號誌燈壞了，線路需要修復！";
+
+        // AI 聯網
+        async function callGemini(prompt, systemPrompt = "你是一位充滿活力的遊戲助手。") {
+            const statusEl = document.getElementById('ai-status');
+            statusEl.innerText = "✨ AI 思考中...";
+            try {
+                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        contents: [{ parts: [{ text: prompt }] }], 
+                        systemInstruction: { parts: [{ text: systemPrompt }] } 
+                    })
+                });
+                const data = await response.json();
+                statusEl.innerText = "";
+                return data.candidates?.[0]?.content?.parts?.[0]?.text || "...";
+            } catch (e) { 
+                statusEl.innerText = "";
+                return "汪！沒問題，交給我！";
+            }
+        }
+
+        async function getStrategy() {
+            const strategy = await callGemini(`目前的任務是：修復16格對角線電路。請給阿奇一個專業的建議！`, "萊德隊長");
+            showBrief("萊德隊長：", strategy);
+        }
+
+        window.onload = () => {
+            initThree();
+            setupLights();
+            createGround();
+            createPlayer();
+            addEnvironment();
+            initMinimap();
+            window.addEventListener('keydown', e => keys[e.code] = true);
+            window.addEventListener('keyup', e => keys[e.code] = false);
+            setTimeout(createNewMission, 1000);
+            animate();
+        };
+
+        function initThree() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87CEEB);
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 5000);
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            document.body.appendChild(renderer.domElement);
+            scene.fog = new THREE.Fog(0x87CEEB, 10, 1000);
+        }
+
+        function setupLights() {
+            scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+            const sun = new THREE.DirectionalLight(0xffffff, 1.0);
+            sun.position.set(50, 100, 50);
+            sun.castShadow = true;
+            scene.add(sun);
+        }
+
+        function createGround() {
+            const ground = new THREE.Mesh(new THREE.PlaneGeometry(3000, 3000), new THREE.MeshPhongMaterial({ color: 0x76b041 }));
+            ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
+        }
+
+        function createPlayer() {
+            player = new THREE.Group();
+            let color = 0x00008B; // 阿奇深藍色
+            playerBody = new THREE.Group();
+            const body = new THREE.Mesh(new THREE.BoxGeometry(2, 1.5, 3), new THREE.MeshPhongMaterial({color}));
+            body.position.y = 1.25; body.castShadow = true; playerBody.add(body);
+            const head = new THREE.Mesh(new THREE.BoxGeometry(1.8, 1.8, 1.8), new THREE.MeshPhongMaterial({color: 0xffffff}));
+            head.position.set(0, 2.5, 1.2); head.castShadow = true; playerBody.add(head);
+            const earGeo = new THREE.BoxGeometry(0.5, 1.2, 0.2);
+            const earMat = new THREE.MeshPhongMaterial({color: 0x5D4037});
+            const lEar = new THREE.Mesh(earGeo, earMat); lEar.position.set(-1, 2.8, 1.2); playerBody.add(lEar);
+            const rEar = new THREE.Mesh(earGeo, earMat); rEar.position.set(1, 2.8, 1.2); playerBody.add(rEar);
+            const legGeo = new THREE.BoxGeometry(0.5, 1, 0.5);
+            const legMat = new THREE.MeshPhongMaterial({color: 0xffffff});
+            for(let i=0; i<4; i++) {
+                const leg = new THREE.Mesh(legGeo, legMat);
+                leg.position.set(i<2?0.7:-0.7, 0.5, (i%2==0)?1:-1);
+                playerBody.add(leg);
+            }
+            player.add(playerBody); scene.add(player);
+            updateCamera(true);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            if(!isMinigameActive && player) {
+                if(keys['ArrowUp']) speed += 0.08;
+                else if(keys['ArrowDown']) speed -= 0.08;
+                else speed *= 0.85;
+                if(keys['ArrowLeft']) rotation += 0.06; 
+                if(keys['ArrowRight']) rotation -= 0.06;
+                speed = THREE.MathUtils.clamp(speed, -1.5, 1.5);
+                player.position.x += Math.sin(rotation) * speed;
+                player.position.z += Math.cos(rotation) * speed;
+                player.rotation.y = rotation;
+                checkTrigger();
+            }
+            updateCamera();
+            updateMinimap();
+            renderer.render(scene, camera);
+        }
+
+        function updateCamera(instant = false) {
+            if(!player) return;
+            const idealOffset = new THREE.Vector3(0, cameraZoom ? 8 : 15, cameraZoom ? -15 : -35);
+            idealOffset.applyQuaternion(player.quaternion);
+            idealOffset.add(player.position);
+            const idealLookAt = player.position.clone().add(new THREE.Vector3(0, 2, 0));
+            if(instant) camera.position.copy(idealOffset);
+            else camera.position.lerp(idealOffset, 0.1);
+            camera.lookAt(idealLookAt);
+        }
+
+        async function createNewMission() {
+            if(missionObject) scene.remove(missionObject);
+            missionObject = new THREE.Group();
+            const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 15), new THREE.MeshPhongMaterial({color: 0x333333}));
+            pole.position.y = 7.5; missionObject.add(pole);
+            const ring = new THREE.Mesh(new THREE.TorusGeometry(8, 0.3, 16, 32), new THREE.MeshPhongMaterial({color: 0xFFD700, transparent: true, opacity: 0.5}));
+            ring.rotation.x = Math.PI/2; ring.position.y = 0.5; missionObject.add(ring);
+            const dist = 100 + Math.random() * 50;
+            const angle = Math.random() * Math.PI * 2;
+            missionObject.position.set(Math.cos(angle)*dist, 0, Math.sin(angle)*dist);
+            scene.add(missionObject);
+            const desc = "阿奇！前方號誌燈電路損壞了，需要你的協助！";
+            document.getElementById('mission-desc').innerText = "任務：" + await callGemini(`萊德口吻：${desc}`);
+        }
+
+        function checkTrigger() {
+            if(!missionObject || isMinigameActive) return;
+            if(player.position.distanceTo(missionObject.position) < 15) {
+                startMinigame();
+            }
+        }
+
+        function startMinigame() {
+            isMinigameActive = true;
+            cameraZoom = true;
+            speed = 0;
+            setTimeout(() => {
+                document.getElementById('minigame-view').style.display = 'flex';
+                initWirePuzzle();
+            }, 500);
+        }
+
+        // --- 16格對角線電路拼圖 ---
+        let wireState = [];
+        let wireTypes = []; // 0: 直線, 1: 彎角
+
+        function initWirePuzzle() {
+            const container = document.getElementById('puzzle-container');
+            container.innerHTML = '';
+            document.getElementById('mini-finish-btn').style.display = 'none';
+            document.getElementById('end-node').classList.remove('active-end');
+            
+            wireState = [];
+            wireTypes = [];
+
+            for(let i=0; i<16; i++) {
+                const type = Math.random() > 0.4 ? 1 : 0; // 更多彎角增加難度
+                const rot = Math.floor(Math.random()*4) * 90;
+                wireTypes.push(type);
+                wireState.push(rot);
+                
+                const cell = document.createElement('div');
+                cell.className = 'wire-cell';
+                
+                let svgContent = '';
+                if(type === 0) { // 直線
+                    svgContent = `<line x1="0" y1="50" x2="100" y2="50" stroke="#555" stroke-width="14" stroke-linecap="round" />`;
+                } else { // 彎角
+                    svgContent = `<path d="M 50 100 Q 50 50 100 50" fill="none" stroke="#555" stroke-width="14" stroke-linecap="round" />`;
+                }
+                
+                cell.innerHTML = `<svg viewBox="0 0 100 100" style="transform: rotate(${rot}deg)">${svgContent}</svg>`;
+                
+                cell.onclick = () => {
+                    wireState[i] = (wireState[i] + 90) % 360;
+                    cell.querySelector('svg').style.transform = `rotate(${wireState[i]}deg)`;
+                    calculateFlow();
+                };
+                container.appendChild(cell);
+            }
+            calculateFlow();
+        }
+
+        // 計算電力流向 (BFS)
+        function calculateFlow() {
+            const cells = document.querySelectorAll('.wire-cell');
+            cells.forEach(c => c.classList.remove('active'));
+            
+            const active = new Set();
+            const queue = [];
+
+            // 定義連通端點 (相對於單元格中心)
+            // 直線：0度為左右 (L, R)
+            // 彎角：0度為下右 (B, R)
+            const getConnections = (idx) => {
+                const type = wireTypes[idx];
+                const rot = wireState[idx];
+                const conns = [];
+                if(type === 0) { // 直線
+                    if(rot === 0 || rot === 180) conns.push('L', 'R');
+                    else conns.push('T', 'B');
+                } else { // 彎角 (預設 0deg 是連接下方和右方)
+                    if(rot === 0) conns.push('B', 'R');
+                    else if(rot === 90) conns.push('B', 'L');
+                    else if(rot === 180) conns.push('T', 'L');
+                    else if(rot === 270) conns.push('T', 'R');
+                }
+                return conns;
+            };
+
+            // 起點檢查 (左上角 index 0 必須有向上或向左的開口來接⚡)
+            const startConns = getConnections(0);
+            if(startConns.includes('T') || startConns.includes('L')) {
+                queue.push(0);
+                active.add(0);
+            }
+
+            while(queue.length > 0) {
+                const curr = queue.shift();
+                const currConns = getConnections(curr);
+                const r = Math.floor(curr / 4);
+                const c = curr % 4;
+
+                // 檢查四個鄰居
+                const neighbors = [
+                    { idx: curr - 4, dir: 'T', opp: 'B' }, // 上
+                    { idx: curr + 4, dir: 'B', opp: 'T' }, // 下
+                    { idx: curr - 1, dir: 'L', opp: 'R' }, // 左
+                    { idx: curr + 1, dir: 'R', opp: 'L' }  // 右
+                ];
+
+                neighbors.forEach(nb => {
+                    // 邊界檢查
+                    if(nb.idx < 0 || nb.idx >= 16) return;
+                    if(nb.dir === 'L' && c === 0) return;
+                    if(nb.dir === 'R' && c === 3) return;
+                    
+                    if(!active.has(nb.idx) && currConns.includes(nb.dir)) {
+                        const nextConns = getConnections(nb.idx);
+                        if(nextConns.includes(nb.opp)) {
+                            active.add(nb.idx);
+                            queue.push(nb.idx);
+                        }
+                    }
+                });
+            }
+
+            active.forEach(idx => cells[idx].classList.add('active'));
+
+            // 勝利條件：右下角 (index 15) 被激活且有向下或向右的開口接🚦
+            const lastConns = getConnections(15);
+            if(active.has(15) && (lastConns.includes('B') || lastConns.includes('R'))) {
+                document.getElementById('end-node').classList.add('active-end');
+                document.getElementById('mini-finish-btn').style.display = 'block';
+            } else {
+                document.getElementById('end-node').classList.remove('active-end');
+                document.getElementById('mini-finish-btn').style.display = 'none';
+            }
+        }
+
+        async function closeMinigame() {
+            document.getElementById('minigame-view').style.display = 'none';
+            score += 2000;
+            document.getElementById('score').innerText = score;
+            isMinigameActive = false; cameraZoom = false;
+            createNewMission();
+        }
+
+        function initMinimap() {
+            const canvas = document.getElementById('minimap-canvas');
+            canvas.width = canvas.height = 130;
+        }
+
+        function updateMinimap() {
+            const canvas = document.getElementById('minimap-canvas');
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0,0,130,130);
+            ctx.fillStyle = "rgba(0,0,0,0.3)"; ctx.beginPath(); ctx.arc(65,65,65,0,Math.PI*2); ctx.fill();
+            const drawDot = (pos, color, size) => {
+                const x = 65 + (pos.x / 500) * 130;
+                const z = 65 + (pos.z / 500) * 130;
+                ctx.fillStyle = color; ctx.beginPath(); ctx.arc(x, z, size, 0, Math.PI*2); ctx.fill();
+            };
+            if(missionObject) drawDot(missionObject.position, "#FFD700", 6);
+            if(player) drawDot(player.position, "white", 4);
+        }
+
+        function addEnvironment() {
+            for(let i=0; i<40; i++) {
+                const tree = new THREE.Group();
+                const t = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 4), new THREE.MeshPhongMaterial({color: 0x5D4037}));
+                t.position.y = 2; tree.add(t);
+                const l = new THREE.Mesh(new THREE.ConeGeometry(3, 8, 8), new THREE.MeshPhongMaterial({color: 0x2E7D32}));
+                l.position.y = 8; tree.add(l);
+                tree.position.set((Math.random()-0.5)*1000, 0, (Math.random()-0.5)*1000);
+                scene.add(tree);
+            }
+        }
+
+        function showBrief(t, c) {
+            document.getElementById('msg-title').innerText = t;
+            document.getElementById('msg-content').innerText = c;
+            document.getElementById('message-box').style.display = 'block';
+        }
+        function closeMessage() { document.getElementById('message-box').style.display = 'none'; window.focus(); }
+    </script>
+</body>
+</html>
