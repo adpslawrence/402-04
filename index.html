@@ -61,7 +61,6 @@
         }
         .ctrl-btn:active { background: rgba(255, 215, 0, 0.5); transform: scale(0.9); }
 
-        /* 小遊戲介面 */
         #minigame-view {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(0,0,0,0.95);
@@ -76,15 +75,17 @@
             margin-top: 20px;
         }
         
-        /* 放置在對角線的節點 */
         .io-node {
             position: absolute;
             width: 50px; height: 50px; border-radius: 50%; background: #333;
-            display: flex; align-items: center; justify-content: center; font-size: 20px;
+            display: flex; align-items: center; justify-content: center; font-size: 24px;
             border: 3px solid #555; transition: all 0.5s; z-index: 10;
         }
-        #start-node { top: -25px; left: -25px; }
-        #end-node { bottom: -25px; right: -25px; }
+        /* 動態位置節點 */
+        .io-node.pos-0 { top: -25px; left: -25px; }
+        .io-node.pos-3 { top: -25px; right: -25px; }
+        .io-node.pos-12 { bottom: -25px; left: -25px; }
+        .io-node.pos-15 { bottom: -25px; right: -25px; }
 
         .io-node.active-start { background: #ffd700; border-color: #fff; box-shadow: 0 0 20px #ffd700; color: #000; }
         .io-node.active-end { background: #00f2ff; border-color: #fff; box-shadow: 0 0 20px #00f2ff; color: #000; }
@@ -114,6 +115,10 @@
             border: 10px solid #00008B; width: 85%; max-width: 420px;
             box-shadow: 0 10px 40px rgba(0,0,0,0.5); color: #333;
         }
+
+        #goal-indicator {
+            margin-top: 10px; font-size: 14px; color: #ffd700; font-weight: bold;
+        }
     </style>
 </head>
 <body onclick="window.focus();">
@@ -123,7 +128,8 @@
             <h3 style="margin:0; color:#FFD700; font-size: 20px;">🚓 阿奇救援行動</h3>
             <div style="font-size: 18px; font-weight: bold; margin-top:5px;">🏅 勳章: <span id="score">0</span></div>
             <div style="margin-top:12px; border-top: 1px solid rgba(255,255,255,0.2); padding-top:10px;">
-                <div id="mission-desc" style="font-size:14px; background:rgba(0,0,0,0.3); padding:8px; border-radius:8px;">尋找損壞的號誌燈...</div>
+                <div id="mission-type-tag" style="font-weight:bold; color:#00f2ff; font-size:12px; margin-bottom:4px;"></div>
+                <div id="mission-desc" style="font-size:14px; background:rgba(0,0,0,0.3); padding:8px; border-radius:8px;">正在讀取萊德隊長的指令...</div>
                 <div id="ai-status" style="font-size:11px; color:#FFD700; margin-top:5px; height:15px;"></div>
                 <button onclick="getStrategy()" style="width:100%; margin-top:10px; padding:8px; font-size:12px; cursor:pointer; border-radius:6px; border:none; background:#00008B; color:white;">✨ 萊德隊長的建議</button>
             </div>
@@ -133,16 +139,17 @@
     <div id="minimap-container"><canvas id="minimap-canvas"></canvas></div>
 
     <div id="minigame-view">
-        <h2 id="mini-title" style="color: #FFD700; font-size: 28px; margin-bottom: 5px;">🚦 電路修復中</h2>
-        <p id="mini-hint" style="color:#ADD8E6; font-size: 16px; margin-bottom: 15px;">對角線連通：從左上角⚡連到右下角🚦！</p>
+        <h2 id="mini-title" style="color: #FFD700; font-size: 28px; margin-bottom: 5px;">任務執行中</h2>
+        <p id="mini-hint" style="color:#ADD8E6; font-size: 16px;">旋轉電線接通能源！</p>
+        <div id="goal-indicator"></div>
         
         <div class="wire-game-wrapper">
             <div id="start-node" class="io-node active-start">⚡</div>
             <div id="puzzle-container"></div>
-            <div id="end-node" class="io-node">🚦</div>
+            <div id="end-node" class="io-node">⚙️</div>
         </div>
         
-        <button id="mini-finish-btn" onclick="closeMinigame()" style="margin-top:40px; padding:15px 50px; border-radius:40px; background:linear-gradient(to right, #004e92, #000428); color:white; border:none; font-weight:bold; cursor:pointer; display:none; font-size:20px; box-shadow: 0 5px 15px rgba(0,0,0,0.3);">✨ 修復完成！</button>
+        <button id="mini-finish-btn" onclick="closeMinigame()" style="margin-top:40px; padding:15px 50px; border-radius:40px; background:linear-gradient(to right, #004e92, #000428); color:white; border:none; font-weight:bold; cursor:pointer; display:none; font-size:20px; box-shadow: 0 5px 15px rgba(0,0,0,0.3);">✨ 任務完成！</button>
     </div>
 
     <div id="touch-controls">
@@ -165,11 +172,16 @@
         let player, playerBody, keys = {};
         let score = 0;
         let missionObject = null, isMinigameActive = false;
+        let currentMissionType = 'SIGNAL'; // SIGNAL, WATER, RADAR
         let speed = 0, rotation = 0;
         let cameraZoom = false;
-        let currentMissionFullText = "號誌燈壞了，線路需要修復！";
 
-        // AI 聯網
+        const MISSION_TYPES = {
+            'SIGNAL': { title: '🚥 號誌燈維修', color: 0xff0000, icon: '🚦', desc: '街口的交通號誌熄滅了！' },
+            'WATER': { title: '💧 水塔控制器', color: 0x00aaff, icon: '⛲', desc: '冒險灣的水塔供電中斷！' },
+            'RADAR': { title: '📡 氣象雷達', color: 0x00ff00, icon: '🔭', desc: '暴風雨要來了，快修好雷達！' }
+        };
+
         async function callGemini(prompt, systemPrompt = "你是一位充滿活力的遊戲助手。") {
             const statusEl = document.getElementById('ai-status');
             statusEl.innerText = "✨ AI 思考中...";
@@ -192,7 +204,8 @@
         }
 
         async function getStrategy() {
-            const strategy = await callGemini(`目前的任務是：修復16格對角線電路。請給阿奇一個專業的建議！`, "萊德隊長");
+            const context = `目前的任務是：${MISSION_TYPES[currentMissionType].title}。電路拼圖規則：${getGoalText()}。`;
+            const strategy = await callGemini(`玩家正在玩汪汪隊遊戲。${context}，請給阿奇一個專業的建議！`, "萊德隊長");
             showBrief("萊德隊長：", strategy);
         }
 
@@ -235,7 +248,7 @@
 
         function createPlayer() {
             player = new THREE.Group();
-            let color = 0x00008B; // 阿奇深藍色
+            let color = 0x00008B;
             playerBody = new THREE.Group();
             const body = new THREE.Mesh(new THREE.BoxGeometry(2, 1.5, 3), new THREE.MeshPhongMaterial({color}));
             body.position.y = 1.25; body.castShadow = true; playerBody.add(body);
@@ -288,24 +301,47 @@
 
         async function createNewMission() {
             if(missionObject) scene.remove(missionObject);
+            
+            // 隨機選擇任務類型
+            const types = Object.keys(MISSION_TYPES);
+            currentMissionType = types[Math.floor(Math.random() * types.length)];
+            const config = MISSION_TYPES[currentMissionType];
+
             missionObject = new THREE.Group();
-            const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 15), new THREE.MeshPhongMaterial({color: 0x333333}));
-            pole.position.y = 7.5; missionObject.add(pole);
-            const ring = new THREE.Mesh(new THREE.TorusGeometry(8, 0.3, 16, 32), new THREE.MeshPhongMaterial({color: 0xFFD700, transparent: true, opacity: 0.5}));
+            
+            // 根據類型建立不同的 3D 物件
+            if(currentMissionType === 'SIGNAL') {
+                const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 15), new THREE.MeshPhongMaterial({color: 0x333333}));
+                pole.position.y = 7.5; missionObject.add(pole);
+                const lightBox = new THREE.Mesh(new THREE.BoxGeometry(2, 6, 2), new THREE.MeshPhongMaterial({color: 0x111111}));
+                lightBox.position.y = 12; missionObject.add(lightBox);
+            } else if(currentMissionType === 'WATER') {
+                const tank = new THREE.Mesh(new THREE.CylinderGeometry(5, 5, 8), new THREE.MeshPhongMaterial({color: 0xaaaaaa}));
+                tank.position.y = 10; missionObject.add(tank);
+                const base = new THREE.Mesh(new THREE.BoxGeometry(6, 6, 6), new THREE.MeshPhongMaterial({color: 0x555555}));
+                base.position.y = 3; missionObject.add(base);
+            } else {
+                const base = new THREE.Mesh(new THREE.CylinderGeometry(2, 4, 4), new THREE.MeshPhongMaterial({color: 0x333333}));
+                base.position.y = 2; missionObject.add(base);
+                const dish = new THREE.Mesh(new THREE.SphereGeometry(6, 32, 32, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshPhongMaterial({color: 0xffffff, side: THREE.DoubleSide}));
+                dish.position.y = 10; dish.rotation.x = -Math.PI/4; missionObject.add(dish);
+            }
+
+            const ring = new THREE.Mesh(new THREE.TorusGeometry(10, 0.5, 16, 32), new THREE.MeshPhongMaterial({color: config.color, transparent: true, opacity: 0.6}));
             ring.rotation.x = Math.PI/2; ring.position.y = 0.5; missionObject.add(ring);
-            const dist = 100 + Math.random() * 50;
+            
+            const dist = 120 + Math.random() * 80;
             const angle = Math.random() * Math.PI * 2;
             missionObject.position.set(Math.cos(angle)*dist, 0, Math.sin(angle)*dist);
             scene.add(missionObject);
-            const desc = "阿奇！前方號誌燈電路損壞了，需要你的協助！";
-            document.getElementById('mission-desc').innerText = "任務：" + await callGemini(`萊德口吻：${desc}`);
+
+            document.getElementById('mission-type-tag').innerText = config.title;
+            document.getElementById('mission-desc').innerText = "任務：" + await callGemini(`萊德口吻：${config.desc}`);
         }
 
         function checkTrigger() {
             if(!missionObject || isMinigameActive) return;
-            if(player.position.distanceTo(missionObject.position) < 15) {
-                startMinigame();
-            }
+            if(player.position.distanceTo(missionObject.position) < 18) startMinigame();
         }
 
         function startMinigame() {
@@ -318,37 +354,69 @@
             }, 500);
         }
 
-        // --- 16格對角線電路拼圖 ---
+        // --- 核心更新：多樣化保證解算法 ---
         let wireState = [];
-        let wireTypes = []; // 0: 直線, 1: 彎角
+        let wireTypes = [];
+        let startIdx = 0, endIdx = 15;
+        let requiredPathLength = 0;
+
+        function getGoalText() {
+            if(currentMissionType === 'SIGNAL') return "從左上連通到右下即可";
+            if(currentMissionType === 'WATER') return "必須連接超過 10 個電路格";
+            if(currentMissionType === 'RADAR') return "連結隨機的兩個對角站台";
+            return "";
+        }
 
         function initWirePuzzle() {
             const container = document.getElementById('puzzle-container');
             container.innerHTML = '';
             document.getElementById('mini-finish-btn').style.display = 'none';
-            document.getElementById('end-node').classList.remove('active-end');
+            document.getElementById('mini-title').innerText = MISSION_TYPES[currentMissionType].title;
+            document.getElementById('goal-indicator').innerText = "目標：" + getGoalText();
             
-            wireState = [];
-            wireTypes = [];
+            // 隨機起點終點 (RADAR 任務)
+            if(currentMissionType === 'RADAR') {
+                const corners = [0, 3, 12, 15];
+                startIdx = corners.splice(Math.floor(Math.random()*4), 1)[0];
+                endIdx = corners[Math.floor(Math.random()*3)];
+            } else {
+                startIdx = 0; endIdx = 15;
+            }
 
+            // 更新 UI 節點位置
+            const sn = document.getElementById('start-node');
+            const en = document.getElementById('end-node');
+            sn.className = `io-node active-start pos-${startIdx}`;
+            en.className = `io-node pos-${endIdx}`;
+            en.innerText = MISSION_TYPES[currentMissionType].icon;
+
+            wireState = new Array(16).fill(0);
+            wireTypes = new Array(16).fill(0);
+            
+            // 1. 生成路徑
+            let path = generateGuaranteedPath(startIdx, endIdx);
+            
+            // 2. 應用路徑到電線類型
+            applyPathToWires(path);
+
+            // 3. 填充剩餘格並旋轉
+            for (let i = 0; i < 16; i++) {
+                const inPath = path.some(p => (p.y * 4 + p.x) === i);
+                if (!inPath) {
+                    wireTypes[i] = Math.random() > 0.5 ? 1 : 0;
+                }
+                wireState[i] = Math.floor(Math.random() * 4) * 90;
+            }
+
+            // 4. 渲染
             for(let i=0; i<16; i++) {
-                const type = Math.random() > 0.4 ? 1 : 0; // 更多彎角增加難度
-                const rot = Math.floor(Math.random()*4) * 90;
-                wireTypes.push(type);
-                wireState.push(rot);
-                
                 const cell = document.createElement('div');
                 cell.className = 'wire-cell';
+                let svgContent = wireTypes[i] === 0 ? 
+                    `<line x1="0" y1="50" x2="100" y2="50" stroke="#555" stroke-width="14" stroke-linecap="round" />` :
+                    `<path d="M 50 100 Q 50 50 100 50" fill="none" stroke="#555" stroke-width="14" stroke-linecap="round" />`;
                 
-                let svgContent = '';
-                if(type === 0) { // 直線
-                    svgContent = `<line x1="0" y1="50" x2="100" y2="50" stroke="#555" stroke-width="14" stroke-linecap="round" />`;
-                } else { // 彎角
-                    svgContent = `<path d="M 50 100 Q 50 50 100 50" fill="none" stroke="#555" stroke-width="14" stroke-linecap="round" />`;
-                }
-                
-                cell.innerHTML = `<svg viewBox="0 0 100 100" style="transform: rotate(${rot}deg)">${svgContent}</svg>`;
-                
+                cell.innerHTML = `<svg viewBox="0 0 100 100" style="transform: rotate(${wireState[i]}deg)">${svgContent}</svg>`;
                 cell.onclick = () => {
                     wireState[i] = (wireState[i] + 90) % 360;
                     cell.querySelector('svg').style.transform = `rotate(${wireState[i]}deg)`;
@@ -359,75 +427,150 @@
             calculateFlow();
         }
 
-        // 計算電力流向 (BFS)
+        function generateGuaranteedPath(sIdx, eIdx) {
+            let sPos = {x: sIdx % 4, y: Math.floor(sIdx / 4)};
+            let ePos = {x: eIdx % 4, y: Math.floor(eIdx / 4)};
+            let path = [sPos];
+            let curr = {...sPos};
+
+            // 隨機漫步直到終點 (簡單實現)
+            const maxSteps = 50;
+            let steps = 0;
+            while((curr.x !== ePos.x || curr.y !== ePos.y) && steps < maxSteps) {
+                let possible = [];
+                if(curr.x < 3) possible.push({x: curr.x+1, y: curr.y});
+                if(curr.x > 0) possible.push({x: curr.x-1, y: curr.y});
+                if(curr.y < 3) possible.push({x: curr.y+1, y: curr.y});
+                if(curr.y > 0) possible.push({x: curr.y-1, y: curr.y});
+
+                // 過濾掉已在路徑中的，除非沒得選
+                let nextChoices = possible.filter(p => !path.some(op => op.x === p.x && op.y === p.y));
+                if(nextChoices.length === 0) break; // 撞牆重來
+
+                // 傾向往終點走
+                nextChoices.sort((a, b) => {
+                    let da = Math.abs(a.x-ePos.x) + Math.abs(a.y-ePos.y);
+                    let db = Math.abs(b.x-ePos.x) + Math.abs(b.y-ePos.y);
+                    return da - db;
+                });
+                
+                curr = nextChoices[0];
+                path.push({...curr});
+                steps++;
+            }
+            
+            // 如果 WATER 任務路徑太短，遞迴重跑
+            if(currentMissionType === 'WATER' && path.length < 9) return generateGuaranteedPath(sIdx, eIdx);
+            return path;
+        }
+
+        function applyPathToWires(path) {
+            for (let i = 0; i < path.length; i++) {
+                const node = path[i];
+                const idx = node.y * 4 + node.x;
+                const prev = path[i-1];
+                const next = path[i+1];
+                let entry = '', exit = '';
+
+                if (i === 0) {
+                    // 起點對外開口處理
+                    if(node.x === 0) entry = 'L'; else if(node.x === 3) entry = 'R'; else if(node.y === 0) entry = 'T'; else entry = 'B';
+                    exit = (next.x > node.x) ? 'R' : (next.x < node.x) ? 'L' : (next.y > node.y) ? 'B' : 'T';
+                } else if (i === path.length - 1) {
+                    entry = (prev.x < node.x) ? 'L' : (prev.x > node.x) ? 'R' : (prev.y < node.y) ? 'T' : 'B';
+                    if(node.x === 0) exit = 'L'; else if(node.x === 3) exit = 'R'; else if(node.y === 0) exit = 'T'; else exit = 'B';
+                } else {
+                    entry = (prev.x < node.x) ? 'L' : (prev.x > node.x) ? 'R' : (prev.y < node.y) ? 'T' : 'B';
+                    exit = (next.x > node.x) ? 'R' : (next.x < node.x) ? 'L' : (next.y > node.y) ? 'B' : 'T';
+                }
+
+                const isStraight = (entry === 'L' && exit === 'R') || (entry === 'R' && exit === 'L') || 
+                                   (entry === 'T' && exit === 'B') || (entry === 'B' && exit === 'T');
+                wireTypes[idx] = isStraight ? 0 : 1;
+
+                // 暫存正確角度用於驗證，稍後會隨機化
+                if (isStraight) {
+                    wireState[idx] = (entry === 'L' || entry === 'R') ? 0 : 90;
+                } else {
+                    const pair = [entry, exit].sort().join('');
+                    if (pair === 'BR') wireState[idx] = 0;
+                    else if (pair === 'BL') wireState[idx] = 90;
+                    else if (pair === 'LT') wireState[idx] = 180;
+                    else if (pair === 'RT') wireState[idx] = 270;
+                }
+            }
+        }
+
+        function getConnections(idx) {
+            const type = wireTypes[idx];
+            const rot = wireState[idx];
+            const conns = [];
+            if(type === 0) {
+                if(rot === 0 || rot === 180) conns.push('L', 'R');
+                else conns.push('T', 'B');
+            } else {
+                if(rot === 0) conns.push('B', 'R');
+                else if(rot === 90) conns.push('B', 'L');
+                else if(rot === 180) conns.push('T', 'L');
+                else if(rot === 270) conns.push('T', 'R');
+            }
+            return conns;
+        }
+
         function calculateFlow() {
             const cells = document.querySelectorAll('.wire-cell');
             cells.forEach(c => c.classList.remove('active'));
-            
             const active = new Set();
             const queue = [];
 
-            // 定義連通端點 (相對於單元格中心)
-            // 直線：0度為左右 (L, R)
-            // 彎角：0度為下右 (B, R)
-            const getConnections = (idx) => {
-                const type = wireTypes[idx];
-                const rot = wireState[idx];
-                const conns = [];
-                if(type === 0) { // 直線
-                    if(rot === 0 || rot === 180) conns.push('L', 'R');
-                    else conns.push('T', 'B');
-                } else { // 彎角 (預設 0deg 是連接下方和右方)
-                    if(rot === 0) conns.push('B', 'R');
-                    else if(rot === 90) conns.push('B', 'L');
-                    else if(rot === 180) conns.push('T', 'L');
-                    else if(rot === 270) conns.push('T', 'R');
-                }
-                return conns;
-            };
+            // 判斷起點是否正確接觸外部
+            const sPos = {x: startIdx % 4, y: Math.floor(startIdx / 4)};
+            const sConns = getConnections(startIdx);
+            let sOk = false;
+            if(sPos.x === 0 && sConns.includes('L')) sOk = true;
+            if(sPos.x === 3 && sConns.includes('R')) sOk = true;
+            if(sPos.y === 0 && sConns.includes('T')) sOk = true;
+            if(sPos.y === 3 && sConns.includes('B')) sOk = true;
 
-            // 起點檢查 (左上角 index 0 必須有向上或向左的開口來接⚡)
-            const startConns = getConnections(0);
-            if(startConns.includes('T') || startConns.includes('L')) {
-                queue.push(0);
-                active.add(0);
-            }
+            if(sOk) { queue.push(startIdx); active.add(startIdx); }
 
             while(queue.length > 0) {
                 const curr = queue.shift();
                 const currConns = getConnections(curr);
                 const r = Math.floor(curr / 4);
                 const c = curr % 4;
-
-                // 檢查四個鄰居
                 const neighbors = [
-                    { idx: curr - 4, dir: 'T', opp: 'B' }, // 上
-                    { idx: curr + 4, dir: 'B', opp: 'T' }, // 下
-                    { idx: curr - 1, dir: 'L', opp: 'R' }, // 左
-                    { idx: curr + 1, dir: 'R', opp: 'L' }  // 右
+                    { idx: curr - 4, dir: 'T', opp: 'B' }, 
+                    { idx: curr + 4, dir: 'B', opp: 'T' },
+                    { idx: curr - 1, dir: 'L', opp: 'R' },
+                    { idx: curr + 1, dir: 'R', opp: 'L' }
                 ];
-
                 neighbors.forEach(nb => {
-                    // 邊界檢查
                     if(nb.idx < 0 || nb.idx >= 16) return;
                     if(nb.dir === 'L' && c === 0) return;
                     if(nb.dir === 'R' && c === 3) return;
-                    
                     if(!active.has(nb.idx) && currConns.includes(nb.dir)) {
-                        const nextConns = getConnections(nb.idx);
-                        if(nextConns.includes(nb.opp)) {
-                            active.add(nb.idx);
-                            queue.push(nb.idx);
+                        if(getConnections(nb.idx).includes(nb.opp)) {
+                            active.add(nb.idx); queue.push(nb.idx);
                         }
                     }
                 });
             }
 
             active.forEach(idx => cells[idx].classList.add('active'));
+            
+            const ePos = {x: endIdx % 4, y: Math.floor(endIdx / 4)};
+            const eConns = getConnections(endIdx);
+            let eOk = false;
+            if(ePos.x === 0 && eConns.includes('L')) eOk = true;
+            if(ePos.x === 3 && eConns.includes('R')) eOk = true;
+            if(ePos.y === 0 && eConns.includes('T')) eOk = true;
+            if(ePos.y === 3 && eConns.includes('B')) eOk = true;
 
-            // 勝利條件：右下角 (index 15) 被激活且有向下或向右的開口接🚦
-            const lastConns = getConnections(15);
-            if(active.has(15) && (lastConns.includes('B') || lastConns.includes('R'))) {
+            let conditionMet = active.has(endIdx) && eOk;
+            if(currentMissionType === 'WATER' && active.size < 10) conditionMet = false;
+
+            if(conditionMet) {
                 document.getElementById('end-node').classList.add('active-end');
                 document.getElementById('mini-finish-btn').style.display = 'block';
             } else {
@@ -438,7 +581,7 @@
 
         async function closeMinigame() {
             document.getElementById('minigame-view').style.display = 'none';
-            score += 2000;
+            score += (currentMissionType === 'WATER' ? 3500 : 2000);
             document.getElementById('score').innerText = score;
             isMinigameActive = false; cameraZoom = false;
             createNewMission();
@@ -459,18 +602,18 @@
                 const z = 65 + (pos.z / 500) * 130;
                 ctx.fillStyle = color; ctx.beginPath(); ctx.arc(x, z, size, 0, Math.PI*2); ctx.fill();
             };
-            if(missionObject) drawDot(missionObject.position, "#FFD700", 6);
+            if(missionObject) drawDot(missionObject.position, MISSION_TYPES[currentMissionType].color, 6);
             if(player) drawDot(player.position, "white", 4);
         }
 
         function addEnvironment() {
-            for(let i=0; i<40; i++) {
+            for(let i=0; i<45; i++) {
                 const tree = new THREE.Group();
                 const t = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 4), new THREE.MeshPhongMaterial({color: 0x5D4037}));
                 t.position.y = 2; tree.add(t);
                 const l = new THREE.Mesh(new THREE.ConeGeometry(3, 8, 8), new THREE.MeshPhongMaterial({color: 0x2E7D32}));
                 l.position.y = 8; tree.add(l);
-                tree.position.set((Math.random()-0.5)*1000, 0, (Math.random()-0.5)*1000);
+                tree.position.set((Math.random()-0.5)*1200, 0, (Math.random()-0.5)*1200);
                 scene.add(tree);
             }
         }
